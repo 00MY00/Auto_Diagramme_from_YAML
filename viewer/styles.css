@@ -6,6 +6,10 @@
   --line: #d9cdbf;
   --accent: #175676;
   --accent-2: #3f8f6b;
+  --field-bg: #fffefb;
+  --field-bg-soft: color-mix(in oklab, var(--panel) 92%, white);
+  --field-ink: var(--ink);
+  --field-placeholder: color-mix(in oklab, var(--muted) 88%, var(--ink));
 }
 
 [data-theme="dark"] {
@@ -16,6 +20,10 @@
   --line: #3c414b;
   --accent: #78b7d8;
   --accent-2: #72c59f;
+  --field-bg: #252a33;
+  --field-bg-soft: #2b313b;
+  --field-ink: #f0ebe4;
+  --field-placeholder: #b9b4aa;
 }
 
 * {
@@ -72,8 +80,8 @@ body {
 .file-picker {
   border: 1px solid var(--line);
   border-radius: 9px;
-  background: #fffefb;
-  color: var(--ink);
+  background: var(--field-bg);
+  color: var(--field-ink);
   font-size: 0.9rem;
   padding: 8px 10px;
 }
@@ -81,7 +89,11 @@ body {
 .controls button {
   cursor: pointer;
   font-weight: 600;
-  background: linear-gradient(180deg, color-mix(in oklab, var(--panel) 82%, white), color-mix(in oklab, var(--panel) 94%, #d7c8b0));
+  background: linear-gradient(
+    180deg,
+    color-mix(in oklab, var(--field-bg-soft) 70%, var(--panel)),
+    color-mix(in oklab, var(--field-bg) 78%, var(--line))
+  );
 }
 
 .controls button:hover {
@@ -97,6 +109,12 @@ body {
 
 .file-picker input[type="file"] {
   max-width: 160px;
+  color: inherit;
+}
+
+.controls input::placeholder,
+.modal-card textarea::placeholder {
+  color: var(--field-placeholder);
 }
 
 .checkbox {
@@ -235,8 +253,8 @@ main {
   border-radius: 10px;
   padding: 10px;
   font: inherit;
-  color: var(--ink);
-  background: #fffefb;
+  color: var(--field-ink);
+  background: var(--field-bg);
 }
 
 .modal-actions {
