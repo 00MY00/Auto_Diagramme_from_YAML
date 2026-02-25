@@ -27,6 +27,18 @@ const viewModeSelect = document.getElementById("viewModeSelect");
 const exportFormatEl = document.getElementById("exportFormat");
 const exportBtn = document.getElementById("exportBtn");
 const themeToggle = document.getElementById("themeToggle");
+const cyWrapEl = document.getElementById("cyWrap");
+const editNodeBtn = document.getElementById("editNodeBtn");
+const editorModal = document.getElementById("editorModal");
+const editorSubtitle = document.getElementById("editorSubtitle");
+const editorInput = document.getElementById("editorInput");
+const editorSaveBtn = document.getElementById("editorSaveBtn");
+const editorCancelBtn = document.getElementById("editorCancelBtn");
+
+let currentYamlDoc = null;
+let currentYamlSource = DEFAULT_YAML_PATH;
+let selectedNodeId = "";
+const EDIT_BUTTON_SIZE = 30;
 
 function setStatus(message, isError = false) {
   statusEl.textContent = message;
@@ -619,10 +631,207 @@ async function exportDiagram() {
   }
 }
 
+function hideEditNodeButton() {
+  editNodeBtn.style.display = "none";
+}
+
+function isEditableNode(node) {
+  if (!node || !node.isNode || !node.isNode()) {
+    return false;
+  }
+  const type = node.data("type");
+  return type === "domain" || type === "feature";
+}
+
+function updateEditButtonPosition() {
+  if (!cy || !selectedNodeId) {
+    hideEditNodeButton();
+    return;
+  }
+
+  const node = cy.getElementById(selectedNodeId);
+  if (!node || node.empty() || !node.visible() || !isEditableNode(node)) {
+    hideEditNodeButton();
+    return;
+  }
+
+  const renderedBox = node.renderedBoundingBox({ includeLabels: true, includeOverlays: false });
+  const shape = String(node.style("shape") || "");
+  let anchorX = renderedBox.x2;
+  let anchorY = renderedBox.y1;
+
+  // Keep the pen on the top-right contour while adapting to node geometry.
+  if (shape === "ellipse") {
+    anchorX -= 9;
+    anchorY += 9;
+  } else if (shape === "diamond") {
+    anchorX -= 13;
+    anchorY += 12;
+  } else {
+    anchorX -= 5;
+    anchorY += 6;
+  }
+
+  const wrapRect = cyWrapEl.getBoundingClientRect();
+  const left = Math.max(0, Math.min(wrapRect.width - EDIT_BUTTON_SIZE, anchorX - EDIT_BUTTON_SIZE / 2));
+  const top = Math.max(0, Math.min(wrapRect.height - EDIT_BUTTON_SIZE, anchorY - EDIT_BUTTON_SIZE / 2));
+
+  editNodeBtn.style.left = `${left}px`;
+  editNodeBtn.style.top = `${top}px`;
+  editNodeBtn.style.display = "inline-flex";
+  editNodeBtn.style.alignItems = "center";
+  editNodeBtn.style.justifyContent = "center";
+}
+
+function closeEditorModal() {
+  editorModal.classList.add("hidden");
+}
+
+function openEditorModalForNode() {
+  if (!cy || !selectedNodeId) {
+    return;
+  }
+
+  const node = cy.getElementById(selectedNodeId);
+  if (!node || node.empty()) {
+    return;
+  }
+
+  if (!isEditableNode(node)) {
+    setStatus("Seuls les domains et features sont editables.", true);
+    return;
+  }
+
+  editorInput.value = String(node.data("label") || "");
+  editorSubtitle.textContent = `Widget: ${node.id()} (${node.data("type")})`;
+  editorModal.classList.remove("hidden");
+  editorInput.focus();
+  editorInput.select();
+}
+
+function updateYamlDocLabel(node, newLabel) {
+  if (!currentYamlDoc || typeof currentYamlDoc !== "object") {
+    return false;
+  }
+
+  const domains = Array.isArray(currentYamlDoc.domains) ? currentYamlDoc.domains : [];
+  const type = node.data("type");
+
+  if (type === "domain") {
+    const domainId = String(node.data("domain") || "").trim();
+    const domain = domains.find((d) => String(d?.id || "") === domainId);
+    if (!domain) {
+      return false;
+    }
+    domain.label = newLabel;
+    return true;
+  }
+
+  if (type === "feature") {
+    const targetFeatureId = String(node.id() || "");
+    for (const domain of domains) {
+      const features = Array.isArray(domain?.features) ? domain.features : [];
+      const feature = features.find((f) => String(f?.id || "") === targetFeatureId);
+      if (feature) {
+        feature.label = newLabel;
+        return true;
+      }
+    }
+  }
+
+  return false;
+}
+
+function downloadYamlFallback(yamlText) {
+  const blob = new Blob([yamlText], { type: "text/yaml;charset=utf-8" });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = "features.yaml";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+async function persistYamlDoc() {
+  if (!currentYamlDoc) {
+    throw new Error("Document YAML non charge");
+  }
+
+  const yamlText = jsyaml.dump(currentYamlDoc, { lineWidth: -1, noRefs: true });
+
+  try {
+    const response = await fetch("/api/save-yaml", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        path: DEFAULT_YAML_PATH,
+        yaml: yamlText
+      })
+    });
+
+    if (!response.ok) {
+      const detail = await response.text();
+      throw new Error(detail || `HTTP ${response.status}`);
+    }
+  } catch (error) {
+    downloadYamlFallback(yamlText);
+    throw new Error(`Sauvegarde serveur indisponible (${error.message}). YAML telecharge.`);
+  }
+}
+
+async function saveNodeLabelChanges() {
+  if (!cy || !selectedNodeId) {
+    return;
+  }
+
+  const node = cy.getElementById(selectedNodeId);
+  if (!node || node.empty() || !isEditableNode(node)) {
+    setStatus("Widget non editable.", true);
+    return;
+  }
+
+  const newLabel = editorInput.value.trim();
+  if (!newLabel) {
+    setStatus("Le texte ne peut pas etre vide.", true);
+    return;
+  }
+
+  const oldLabel = String(node.data("label") || "");
+  if (newLabel === oldLabel) {
+    closeEditorModal();
+    setStatus("Aucun changement detecte.");
+    return;
+  }
+
+  const updated = updateYamlDocLabel(node, newLabel);
+  if (!updated) {
+    setStatus("Impossible de mettre a jour ce widget dans le YAML.", true);
+    return;
+  }
+
+  node.data("label", newLabel);
+  cy.style().update();
+  updateEditButtonPosition();
+  closeEditorModal();
+
+  try {
+    await persistYamlDoc();
+    setStatus(`Widget mis a jour et YAML sauvegarde (${currentYamlSource}).`);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
 function initCy(elements) {
   if (cy) {
     cy.destroy();
   }
+
+  selectedNodeId = "";
+  hideEditNodeButton();
+  closeEditorModal();
 
   cy = cytoscape({
     container: document.getElementById("cy"),
@@ -757,6 +966,20 @@ function initCy(elements) {
   applyContainmentVisibility();
   applySearchFilter();
   applyTheme();
+
+  cy.on("tap", "node", (event) => {
+    selectedNodeId = event.target.id();
+    updateEditButtonPosition();
+  });
+
+  cy.on("tap", (event) => {
+    if (event.target === cy) {
+      selectedNodeId = "";
+      hideEditNodeButton();
+    }
+  });
+
+  cy.on("drag free position pan zoom resize render", updateEditButtonPosition);
 }
 
 function applyTheme() {
@@ -832,6 +1055,9 @@ function renderFromYamlText(yamlText, sourceLabel) {
     throw new Error("YAML vide ou invalide");
   }
 
+  currentYamlDoc = parsed;
+  currentYamlSource = sourceLabel;
+
   const graph = buildGraphElements(parsed);
   initCy(graph);
 
@@ -864,6 +1090,25 @@ yamlFileInput.addEventListener("change", async (event) => {
     renderFromYamlText(text, file.name);
   } catch (error) {
     setStatus(`Erreur de parsing YAML: ${error.message}`, true);
+  }
+});
+
+editNodeBtn.addEventListener("click", openEditorModalForNode);
+editorCancelBtn.addEventListener("click", closeEditorModal);
+editorSaveBtn.addEventListener("click", saveNodeLabelChanges);
+editorModal.addEventListener("click", (event) => {
+  if (event.target === editorModal) {
+    closeEditorModal();
+  }
+});
+editorInput.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeEditorModal();
+    return;
+  }
+
+  if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+    saveNodeLabelChanges();
   }
 });
 

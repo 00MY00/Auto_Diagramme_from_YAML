@@ -56,8 +56,26 @@
 
     <main>
       <section id="status" aria-live="polite">Chargement...</section>
-      <section id="cy" aria-label="Diagramme interactif"></section>
+      <section id="cyWrap" aria-label="Diagramme interactif">
+        <section id="cy"></section>
+        <button id="editNodeBtn" type="button" title="Editer ce widget" aria-label="Editer ce widget">
+          ✎
+        </button>
+      </section>
     </main>
+
+    <div id="editorModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="editorTitle">
+      <div class="modal-card">
+        <h2 id="editorTitle">Edition du widget</h2>
+        <p id="editorSubtitle"></p>
+        <label for="editorInput">Texte</label>
+        <textarea id="editorInput" rows="4" placeholder="Nouveau texte"></textarea>
+        <div class="modal-actions">
+          <button id="editorCancelBtn" type="button">Annuler</button>
+          <button id="editorSaveBtn" type="button">Sauvegarder changements</button>
+        </div>
+      </div>
+    </div>
 
     <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.31.2/dist/cytoscape.min.js"></script>

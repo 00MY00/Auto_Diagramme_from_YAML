@@ -18,11 +18,10 @@ if (-not $python) {
 }
 
 $url = "http://localhost:$Port/viewer/"
-Write-Host "Ouverture de $url"
-Start-Process $url | Out-Null
+Write-Host "Lancement du serveur interactif sur $url"
 
 if ($python.Name -eq "py") {
-  & py -m http.server $Port
+  & py .\start-diagram.py --port $Port
 } else {
-  & python -m http.server $Port
+  & python .\start-diagram.py --port $Port
 }
