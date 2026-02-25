@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="fr">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>YAML Feature Diagram</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="title">
+        <h1>Diagramme YAML interactif</h1>
+        <p>Drag & drop des bulles avec connexions conservees</p>
+      </div>
+
+      <div class="controls">
+        <label class="file-picker">
+          Charger un YAML
+          <input id="yamlFileInput" type="file" accept=".yaml,.yml" />
+        </label>
+
+        <input
+          id="searchInput"
+          type="search"
+          placeholder="Recherche (feature, domain, relation)"
+        />
+
+        <label class="checkbox">
+          <input id="showContainmentInput" type="checkbox" checked />
+          Montrer les liens domain -> feature
+        </label>
+
+        <button id="layoutBtn" type="button">Recalculer layout</button>
+        <button id="refreshBtn" type="button">Actualiser</button>
+        <button id="saveBtn" type="button">Sauvegarder positions</button>
+        <button id="resetBtn" type="button">Reset positions</button>
+        <select id="viewModeSelect" aria-label="Mode d affichage">
+          <option value="cluster">Mode cluster</option>
+          <option value="tree_horizontal">Arborescence horizontale</option>
+          <option value="tree_file">Arborescence tree (fichier)</option>
+        </select>
+        <select id="exportFormat" aria-label="Format d export">
+          <option value="png">PNG</option>
+          <option value="jpg">JPG</option>
+          <option value="webp">WEBP</option>
+          <option value="pdf">PDF</option>
+        </select>
+        <button id="exportBtn" type="button">Exporter</button>
+        <label class="theme-switch" for="themeToggle">
+          <span>Clair</span>
+          <input id="themeToggle" type="checkbox" role="switch" />
+          <span>Sombre</span>
+        </label>
+      </div>
+    </header>
+
+    <main>
+      <section id="status" aria-live="polite">Chargement...</section>
+      <section id="cy" aria-label="Diagramme interactif"></section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/js-yaml@4.1.0/dist/js-yaml.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/cytoscape@3.31.2/dist/cytoscape.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jspdf@2.5.1/dist/jspdf.umd.min.js"></script>
+    <script src="./app.js"></script>
+  </body>
+</html>
