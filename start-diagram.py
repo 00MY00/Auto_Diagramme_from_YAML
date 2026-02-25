@@ -35,14 +35,56 @@ def main() -> int:
 
     project_root = Path(__file__).resolve().parent
     os.chdir(project_root)
-    target_yaml_path = (project_root / "YAML" / "features.yaml").resolve()
+    yaml_dir = (project_root / "YAML").resolve()
 
     url = f"http://localhost:{port}/viewer/"
     print(f"Serving from: {project_root}")
     print(f"Opening: {url}")
     print("Press Ctrl+C to stop.")
 
+    def list_yaml_files() -> list[str]:
+        if not yaml_dir.exists():
+            return []
+        files = []
+        for child in yaml_dir.iterdir():
+            if child.is_file() and child.suffix.lower() in {".yaml", ".yml"}:
+                files.append(child.name)
+        return sorted(files, key=str.lower)
+
+    def resolve_yaml_target(requested_path: str) -> Path | None:
+        normalized = requested_path.replace("\\", "/").strip()
+        while normalized.startswith("../"):
+            normalized = normalized[3:]
+        if normalized.startswith("./"):
+            normalized = normalized[2:]
+        if not normalized:
+            return None
+
+        candidate = (project_root / normalized).resolve()
+        if candidate.suffix.lower() not in {".yaml", ".yml"}:
+            return None
+
+        try:
+            candidate.relative_to(yaml_dir)
+        except ValueError:
+            return None
+
+        return candidate
+
     class DiagramRequestHandler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self) -> None:
+            if self.path == "/api/yaml-files":
+                payload = json.dumps({"files": list_yaml_files()}).encode("utf-8")
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json; charset=utf-8")
+                self.send_header("Cache-Control", "no-store")
+                self.send_header("Content-Length", str(len(payload)))
+                self.end_headers()
+                self.wfile.write(payload)
+                return
+
+            super().do_GET()
+
         def do_POST(self) -> None:
             if self.path != "/api/save-yaml":
                 self.send_error(404, "Endpoint introuvable")
@@ -60,11 +102,12 @@ def main() -> int:
                 self.send_error(400, "JSON invalide")
                 return
 
-            requested_path = str(payload.get("path", "")).replace("\\", "/")
+            requested_path = str(payload.get("path", ""))
             yaml_text = payload.get("yaml")
 
-            if requested_path not in {"YAML/features.yaml", "../YAML/features.yaml"}:
-                self.send_error(400, "Seul YAML/features.yaml est autorise")
+            target_yaml_path = resolve_yaml_target(requested_path)
+            if target_yaml_path is None:
+                self.send_error(400, "Chemin YAML invalide (autorise: YAML/*.yml|*.yaml)")
                 return
 
             if not isinstance(yaml_text, str):

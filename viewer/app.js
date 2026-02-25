@@ -1,4 +1,6 @@
 const DEFAULT_YAML_PATH = "../YAML/features.yaml";
+const YAML_API_FILES_PATH = "/api/yaml-files";
+const YAML_DIR_WEB_PATH = "../YAML/";
 const POSITION_STORAGE_KEY = "yaml_feature_diagram_positions_v1";
 const CLUSTER_PALETTE = [
   "#2c7da0",
@@ -788,12 +790,29 @@ function updateYamlDocLabel(node, newLabel) {
   return false;
 }
 
-function downloadYamlFallback(yamlText) {
+function sourceBaseName(sourceLabel) {
+  const source = String(sourceLabel || "").replace(/\\/g, "/");
+  const parts = source.split("/");
+  return parts[parts.length - 1] || "features.yaml";
+}
+
+function serverYamlPathFromSource(sourceLabel) {
+  const source = String(sourceLabel || "").replace(/\\/g, "/");
+  if (source.startsWith("../YAML/")) {
+    return `YAML/${source.slice("../YAML/".length)}`;
+  }
+  if (source.startsWith("YAML/")) {
+    return source;
+  }
+  return null;
+}
+
+function downloadYamlFallback(yamlText, fileName = "features.yaml") {
   const blob = new Blob([yamlText], { type: "text/yaml;charset=utf-8" });
   const url = URL.createObjectURL(blob);
   const a = document.createElement("a");
   a.href = url;
-  a.download = "features.yaml";
+  a.download = fileName;
   document.body.appendChild(a);
   a.click();
   a.remove();
@@ -806,13 +825,20 @@ async function persistYamlDoc() {
   }
 
   const yamlText = jsyaml.dump(currentYamlDoc, { lineWidth: -1, noRefs: true });
+  const serverPath = serverYamlPathFromSource(currentYamlSource);
+  const fallbackName = sourceBaseName(currentYamlSource);
+
+  if (!serverPath) {
+    downloadYamlFallback(yamlText, fallbackName);
+    throw new Error("Ce YAML ne vient pas du dossier YAML/. Export telecharge.");
+  }
 
   try {
     const response = await fetch("/api/save-yaml", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
-        path: DEFAULT_YAML_PATH,
+        path: serverPath,
         yaml: yamlText
       })
     });
@@ -822,7 +848,7 @@ async function persistYamlDoc() {
       throw new Error(detail || `HTTP ${response.status}`);
     }
   } catch (error) {
-    downloadYamlFallback(yamlText);
+    downloadYamlFallback(yamlText, fallbackName);
     throw new Error(`Sauvegarde serveur indisponible (${error.message}). YAML telecharge.`);
   }
 }
@@ -1136,6 +1162,85 @@ async function loadYamlFromPath(path) {
   return response.text();
 }
 
+async function listYamlFilesInProject() {
+  const response = await fetch(YAML_API_FILES_PATH, { cache: "no-store" });
+  if (!response.ok) {
+    throw new Error(`HTTP ${response.status}`);
+  }
+
+  const payload = await response.json();
+  if (!payload || !Array.isArray(payload.files)) {
+    throw new Error("Reponse /api/yaml-files invalide");
+  }
+
+  return payload.files
+    .map((item) => String(item || "").trim())
+    .filter((name) => Boolean(name) && /\.(yaml|yml)$/i.test(name));
+}
+
+async function resolveSourceLabelForPickedFile(fileName) {
+  const safeName = String(fileName || "").trim();
+  if (!safeName) {
+    return safeName;
+  }
+
+  try {
+    const yamlFiles = await listYamlFilesInProject();
+    if (yamlFiles.includes(safeName)) {
+      return `${YAML_DIR_WEB_PATH}${safeName}`;
+    }
+  } catch (error) {
+    console.warn("Resolution de source YAML impossible, conservation du nom local.", error);
+  }
+
+  return safeName;
+}
+
+function chooseYamlFile(files) {
+  const lines = files.map((name, index) => `${index + 1}. ${name}`).join("\n");
+  while (true) {
+    const answer = window.prompt(
+      `Plusieurs YAML detectes dans YAML/.\nChoisis le numero a charger:\n\n${lines}`,
+      "1"
+    );
+    if (answer === null) {
+      return null;
+    }
+
+    const idx = Number.parseInt(answer, 10);
+    if (Number.isInteger(idx) && idx >= 1 && idx <= files.length) {
+      return files[idx - 1];
+    }
+  }
+}
+
+async function openYamlExplorer() {
+  // Try modern file picker first; fallback to hidden input click.
+  if (window.showOpenFilePicker) {
+    try {
+      const [handle] = await window.showOpenFilePicker({
+        multiple: false,
+        types: [{ description: "YAML", accept: { "text/yaml": [".yaml", ".yml"] } }]
+      });
+      if (handle) {
+        const file = await handle.getFile();
+        const text = await file.text();
+        const sourceLabel = await resolveSourceLabelForPickedFile(file.name);
+        renderFromYamlText(text, sourceLabel);
+        return true;
+      }
+    } catch (error) {
+      if (error?.name !== "AbortError") {
+        console.warn("showOpenFilePicker indisponible, fallback input file.", error);
+      }
+    }
+  }
+
+  yamlFileInput.value = "";
+  yamlFileInput.click();
+  return false;
+}
+
 function renderFromYamlText(yamlText, sourceLabel) {
   const parsed = jsyaml.load(yamlText);
   if (!parsed || typeof parsed !== "object") {
@@ -1155,11 +1260,33 @@ function renderFromYamlText(yamlText, sourceLabel) {
 
 async function init() {
   try {
-    const yamlText = await loadYamlFromPath(DEFAULT_YAML_PATH);
-    renderFromYamlText(yamlText, DEFAULT_YAML_PATH);
+    const yamlFiles = await listYamlFilesInProject();
+
+    if (yamlFiles.length === 1) {
+      const selectedFile = yamlFiles[0];
+      const sourcePath = `${YAML_DIR_WEB_PATH}${selectedFile}`;
+      const yamlText = await loadYamlFromPath(sourcePath);
+      renderFromYamlText(yamlText, sourcePath);
+      return;
+    }
+
+    if (yamlFiles.length > 1) {
+      const selectedFile = chooseYamlFile(yamlFiles);
+      if (!selectedFile) {
+        setStatus("Selection annulee. Utilise 'Charger un YAML' pour continuer.", true);
+        return;
+      }
+      const sourcePath = `${YAML_DIR_WEB_PATH}${selectedFile}`;
+      const yamlText = await loadYamlFromPath(sourcePath);
+      renderFromYamlText(yamlText, sourcePath);
+      return;
+    }
+
+    setStatus("Aucun YAML dans YAML/. Ouverture de l explorateur de fichiers...");
+    await openYamlExplorer();
   } catch (error) {
     setStatus(
-      `Impossible de charger ${DEFAULT_YAML_PATH}. Lance un serveur local puis recharge, ou charge un fichier YAML manuellement.`,
+      "Chargement auto impossible. Lance le serveur local puis charge un fichier YAML manuellement.",
       true
     );
     console.error(error);
@@ -1174,7 +1301,8 @@ yamlFileInput.addEventListener("change", async (event) => {
 
   try {
     const text = await file.text();
-    renderFromYamlText(text, file.name);
+    const sourceLabel = await resolveSourceLabelForPickedFile(file.name);
+    renderFromYamlText(text, sourceLabel);
   } catch (error) {
     setStatus(`Erreur de parsing YAML: ${error.message}`, true);
   }
