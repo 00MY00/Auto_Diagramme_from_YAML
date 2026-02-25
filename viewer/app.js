@@ -39,6 +39,7 @@ let currentYamlDoc = null;
 let currentYamlSource = DEFAULT_YAML_PATH;
 let selectedNodeId = "";
 const EDIT_BUTTON_SIZE = 30;
+let focusedNodeId = "";
 
 function setStatus(message, isError = false) {
   statusEl.textContent = message;
@@ -533,6 +534,51 @@ function applySearchFilter() {
   cy.elements().difference(focus).addClass("faded");
 }
 
+function clearNeighborFocus() {
+  if (!cy) {
+    return;
+  }
+  cy.elements().removeClass("focus-faded focus-highlight focus-target");
+  focusedNodeId = "";
+}
+
+function applyNeighborFocus(nodeId) {
+  if (!cy || !nodeId) {
+    return;
+  }
+
+  const node = cy.getElementById(nodeId);
+  if (!node || node.empty()) {
+    clearNeighborFocus();
+    return;
+  }
+
+  const linkedEdges = node.connectedEdges();
+  const linkedNodes = linkedEdges.connectedNodes();
+  const focusSet = node.union(linkedEdges).union(linkedNodes);
+
+  cy.elements().addClass("focus-faded");
+  focusSet.removeClass("focus-faded").addClass("focus-highlight");
+  node.addClass("focus-target");
+  focusedNodeId = nodeId;
+}
+
+function toggleNeighborFocus(nodeId) {
+  if (!nodeId) {
+    return;
+  }
+
+  if (focusedNodeId === nodeId) {
+    clearNeighborFocus();
+    setStatus("Surbrillance directe desactivee.");
+    return;
+  }
+
+  clearNeighborFocus();
+  applyNeighborFocus(nodeId);
+  setStatus(`Surbrillance directe activee pour: ${nodeId}`);
+}
+
 function downloadDataUrl(dataUrl, fileName) {
   const a = document.createElement("a");
   a.href = dataUrl;
@@ -830,6 +876,7 @@ function initCy(elements) {
   }
 
   selectedNodeId = "";
+  focusedNodeId = "";
   hideEditNodeButton();
   closeEditorModal();
 
@@ -948,6 +995,35 @@ function initCy(elements) {
         style: {
           opacity: 0.12
         }
+      },
+      {
+        selector: ".focus-faded",
+        style: {
+          opacity: 0.1
+        }
+      },
+      {
+        selector: "node.focus-highlight",
+        style: {
+          opacity: 1
+        }
+      },
+      {
+        selector: "edge.focus-highlight",
+        style: {
+          opacity: 1,
+          width: 2
+        }
+      },
+      {
+        selector: "node.focus-target",
+        style: {
+          "border-color": "#f08a24",
+          "border-width": 4,
+          "overlay-color": "#f08a24",
+          "overlay-opacity": 0.1,
+          "overlay-padding": 5
+        }
       }
     ],
     wheelSensitivity: 0.2
@@ -972,10 +1048,21 @@ function initCy(elements) {
     updateEditButtonPosition();
   });
 
+  cy.on("dbltap", "node", (event) => {
+    toggleNeighborFocus(event.target.id());
+  });
+
   cy.on("tap", (event) => {
     if (event.target === cy) {
       selectedNodeId = "";
       hideEditNodeButton();
+    }
+  });
+
+  cy.on("dbltap", (event) => {
+    if (event.target === cy) {
+      clearNeighborFocus();
+      setStatus("Surbrillance directe desactivee.");
     }
   });
 
