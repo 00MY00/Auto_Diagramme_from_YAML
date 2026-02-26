@@ -26,6 +26,7 @@ const refreshBtn = document.getElementById("refreshBtn");
 const saveBtn = document.getElementById("saveBtn");
 const resetBtn = document.getElementById("resetBtn");
 const viewModeSelect = document.getElementById("viewModeSelect");
+const sortModeSelect = document.getElementById("sortModeSelect");
 const exportFormatEl = document.getElementById("exportFormat");
 const exportBtn = document.getElementById("exportBtn");
 const themeToggle = document.getElementById("themeToggle");
@@ -42,6 +43,78 @@ let currentYamlSource = DEFAULT_YAML_PATH;
 let selectedNodeId = "";
 const EDIT_BUTTON_SIZE = 30;
 let focusedNodeId = "";
+const ORDER_TAG_WEIGHT = {
+  first: 0,
+  medium: 500,
+  latest: 1000
+};
+const TEXT_COLLATOR = new Intl.Collator("fr", { numeric: true, sensitivity: "base" });
+
+function extractOrderTagValue(rawText) {
+  const text = String(rawText || "").toLowerCase();
+  const re = /\[([^\]]+)\]/g;
+  let minValue = Number.POSITIVE_INFINITY;
+  let match;
+  while ((match = re.exec(text)) !== null) {
+    const token = String(match[1] || "").trim();
+    if (!token) {
+      continue;
+    }
+    if (Object.prototype.hasOwnProperty.call(ORDER_TAG_WEIGHT, token)) {
+      minValue = Math.min(minValue, ORDER_TAG_WEIGHT[token]);
+      continue;
+    }
+    if (/^\d+$/.test(token)) {
+      minValue = Math.min(minValue, Number.parseInt(token, 10));
+    }
+  }
+  return Number.isFinite(minValue) ? minValue : null;
+}
+
+function displayTextForSort(node) {
+  const label = String(node?.data?.("label") || "").trim();
+  const id = String(node?.id?.() || "").trim();
+  return label || id;
+}
+
+function compareByTextAsc(a, b) {
+  return TEXT_COLLATOR.compare(displayTextForSort(a), displayTextForSort(b));
+}
+
+function compareByOrderTagsAsc(a, b) {
+  const aRank = extractOrderTagValue(`${a.data("label")} ${a.id()}`);
+  const bRank = extractOrderTagValue(`${b.data("label")} ${b.id()}`);
+  if (aRank !== null || bRank !== null) {
+    if (aRank === null) {
+      return 1;
+    }
+    if (bRank === null) {
+      return -1;
+    }
+    if (aRank !== bRank) {
+      return aRank - bRank;
+    }
+  }
+  return compareByTextAsc(a, b);
+}
+
+function compareByOrderTagsDesc(a, b) {
+  return compareByOrderTagsAsc(b, a);
+}
+
+function compareNodesForLayout(a, b) {
+  const mode = sortModeSelect?.value || "auto_tags_asc";
+  if (mode === "alpha_asc") {
+    return compareByTextAsc(a, b);
+  }
+  if (mode === "alpha_desc") {
+    return compareByTextAsc(b, a);
+  }
+  if (mode === "tags_desc") {
+    return compareByOrderTagsDesc(a, b);
+  }
+  return compareByOrderTagsAsc(a, b);
+}
 
 function setStatus(message, isError = false) {
   statusEl.textContent = message;
@@ -397,7 +470,7 @@ function buildFileTreePositions() {
 
   const domainNodes = cy
     .nodes("[type = 'domain']")
-    .sort((a, b) => (a.data("label") || "").localeCompare(b.data("label") || ""));
+    .sort(compareNodesForLayout);
 
   const placed = new Set();
 
@@ -410,7 +483,7 @@ function buildFileTreePositions() {
     const features = cy
       .edges(`[kind = 'contains'][source = '${domainId}']`)
       .targets()
-      .sort((a, b) => (a.data("label") || "").localeCompare(b.data("label") || ""));
+      .sort(compareNodesForLayout);
 
     features.forEach((featureNode) => {
       const featureId = featureNode.id();
@@ -422,7 +495,7 @@ function buildFileTreePositions() {
       const externalNodes = featureNode
         .connectedEdges("[kind = 'relation']")
         .connectedNodes("[type = 'external']")
-        .sort((a, b) => (a.data("label") || "").localeCompare(b.data("label") || ""));
+        .sort(compareNodesForLayout);
 
       let extCount = 0;
       externalNodes.forEach((extNode) => {
@@ -454,6 +527,72 @@ function buildFileTreePositions() {
   return positions;
 }
 
+function buildClusterSeedPositions() {
+  const positions = {};
+  const domainX = 140;
+  const featureX = 420;
+  const externalX = 690;
+  const baseGapY = 70;
+  let y = 70;
+
+  const domainNodes = cy
+    .nodes("[type = 'domain']")
+    .sort(compareNodesForLayout);
+
+  const placed = new Set();
+
+  domainNodes.forEach((domainNode) => {
+    const domainId = domainNode.id();
+    positions[domainId] = { x: domainX, y };
+    placed.add(domainId);
+
+    let localY = y + baseGapY;
+    const features = cy
+      .edges(`[kind = 'contains'][source = '${domainId}']`)
+      .targets()
+      .sort(compareNodesForLayout);
+
+    features.forEach((featureNode) => {
+      const featureId = featureNode.id();
+      if (!placed.has(featureId)) {
+        positions[featureId] = { x: featureX, y: localY };
+        placed.add(featureId);
+      }
+
+      const externalNodes = featureNode
+        .connectedEdges("[kind = 'relation']")
+        .connectedNodes("[type = 'external']")
+        .sort(compareNodesForLayout);
+
+      let extCount = 0;
+      externalNodes.forEach((extNode) => {
+        const extId = extNode.id();
+        if (placed.has(extId)) {
+          return;
+        }
+        positions[extId] = { x: externalX, y: localY + extCount * 46 };
+        placed.add(extId);
+        extCount++;
+      });
+
+      localY += baseGapY + extCount * 18;
+    });
+
+    y = Math.max(localY + 18, y + baseGapY * 2);
+  });
+
+  let orphanY = y;
+  cy.nodes().forEach((node) => {
+    if (placed.has(node.id())) {
+      return;
+    }
+    positions[node.id()] = { x: externalX + 170, y: orphanY };
+    orphanY += baseGapY;
+  });
+
+  return positions;
+}
+
 function runLayout() {
   if (!cy) {
     return;
@@ -474,7 +613,8 @@ function runLayout() {
       spacingFactor: 1.35,
       avoidOverlap: true,
       avoidOverlapPadding: 30,
-      nodeDimensionsIncludeLabels: true
+      nodeDimensionsIncludeLabels: true,
+      sort: compareNodesForLayout
     });
   } else if (mode === "tree_file") {
     layout = cy.layout({
@@ -486,6 +626,16 @@ function runLayout() {
       animationDuration: 320
     });
   } else {
+    const seedPositions = buildClusterSeedPositions();
+    cy.batch(() => {
+      cy.nodes().forEach((node) => {
+        const position = seedPositions[node.id()];
+        if (position) {
+          node.position(position);
+        }
+      });
+    });
+
     layout = cy.layout({
       name: "cose",
       fit: true,
@@ -497,7 +647,8 @@ function runLayout() {
       edgeElasticity: 110,
       nodeDimensionsIncludeLabels: true,
       nodeOverlap: 10,
-      gravity: 0.7
+      gravity: 0.7,
+      randomize: false
     });
   }
 
@@ -1334,6 +1485,7 @@ refreshBtn.addEventListener("click", () => window.location.reload());
 saveBtn.addEventListener("click", savePositions);
 resetBtn.addEventListener("click", resetPositions);
 viewModeSelect.addEventListener("change", runLayout);
+sortModeSelect?.addEventListener("change", runLayout);
 exportBtn.addEventListener("click", exportDiagram);
 themeToggle.addEventListener("change", applyTheme);
 
