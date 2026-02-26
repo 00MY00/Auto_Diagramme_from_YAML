@@ -6,6 +6,7 @@ const THEME_STORAGE_KEY = "yaml_feature_diagram_theme_v1";
 const SORT_MODE_STORAGE_KEY = "yaml_feature_diagram_sort_mode_v1";
 const VIEW_MODE_STORAGE_KEY = "yaml_feature_diagram_view_mode_v1";
 const VIEWPORT_STORAGE_KEY = "yaml_feature_diagram_viewport_v1";
+const CONTROLS_COLLAPSED_STORAGE_KEY = "yaml_feature_diagram_controls_collapsed_v1";
 const CLUSTER_PALETTE = [
   "#2c7da0",
   "#a23b72",
@@ -34,6 +35,11 @@ const sortModeSelect = document.getElementById("sortModeSelect");
 const exportFormatEl = document.getElementById("exportFormat");
 const exportBtn = document.getElementById("exportBtn");
 const themeToggle = document.getElementById("themeToggle");
+const controlsPanel = document.getElementById("controlsPanel");
+const toggleControlsBtn = document.getElementById("toggleControlsBtn");
+const sortHelpBtn = document.getElementById("sortHelpBtn");
+const sortHelpModal = document.getElementById("sortHelpModal");
+const sortHelpCloseBtn = document.getElementById("sortHelpCloseBtn");
 const cyWrapEl = document.getElementById("cyWrap");
 const editNodeBtn = document.getElementById("editNodeBtn");
 const editorModal = document.getElementById("editorModal");
@@ -204,9 +210,41 @@ function restoreUiPreferences() {
         viewModeSelect.value = savedViewMode;
       }
     }
+
+    const savedCollapsed = localStorage.getItem(CONTROLS_COLLAPSED_STORAGE_KEY);
+    if (savedCollapsed === "1") {
+      setControlsCollapsed(true);
+    } else if (savedCollapsed === "0") {
+      setControlsCollapsed(false);
+    }
   } catch (error) {
     console.warn("Restauration des preferences UI impossible.", error);
   }
+}
+
+function setControlsCollapsed(collapsed) {
+  if (!controlsPanel || !toggleControlsBtn) {
+    return;
+  }
+  controlsPanel.classList.toggle("is-collapsed", collapsed);
+  document.documentElement.classList.toggle("controls-collapsed", collapsed);
+  toggleControlsBtn.textContent = collapsed ? "▾" : "▴";
+  toggleControlsBtn.setAttribute("aria-label", collapsed ? "Afficher le panneau" : "Replier le panneau");
+  toggleControlsBtn.setAttribute("aria-expanded", collapsed ? "false" : "true");
+}
+
+function openSortHelpModal() {
+  if (!sortHelpModal) {
+    return;
+  }
+  sortHelpModal.classList.remove("hidden");
+}
+
+function closeSortHelpModal() {
+  if (!sortHelpModal) {
+    return;
+  }
+  sortHelpModal.classList.add("hidden");
 }
 
 function saveViewportState() {
@@ -1679,6 +1717,23 @@ editorInput.addEventListener("keydown", (event) => {
     saveNodeLabelChanges();
   }
 });
+sortHelpModal?.addEventListener("click", (event) => {
+  if (event.target === sortHelpModal) {
+    closeSortHelpModal();
+  }
+});
+sortHelpCloseBtn?.addEventListener("click", closeSortHelpModal);
+sortHelpBtn?.addEventListener("click", openSortHelpModal);
+toggleControlsBtn?.addEventListener("click", () => {
+  const collapsed = !controlsPanel?.classList.contains("is-collapsed");
+  setControlsCollapsed(collapsed);
+  localStorage.setItem(CONTROLS_COLLAPSED_STORAGE_KEY, collapsed ? "1" : "0");
+});
+window.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    closeSortHelpModal();
+  }
+});
 
 showContainmentInput.addEventListener("change", applyContainmentVisibility);
 searchInput.addEventListener("input", applySearchFilter);
@@ -1701,6 +1756,7 @@ sortModeSelect?.addEventListener("change", () => {
 });
 window.addEventListener("beforeunload", saveViewportState);
 
+setControlsCollapsed(false);
 restoreUiPreferences();
 applyTheme();
 init();

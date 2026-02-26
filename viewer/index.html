@@ -10,10 +10,11 @@
     <header class="topbar">
       <div class="title">
         <h1>Diagramme YAML interactif</h1>
+        <button id="sortHelpBtn" type="button" class="floating-help-btn" aria-label="Aide tri">?</button>
         <p>Drag & drop des bulles avec connexions conservees</p>
       </div>
 
-      <div class="controls">
+      <div id="controlsPanel" class="controls">
         <label class="file-picker">
           Charger un YAML
           <input id="yamlFileInput" type="file" accept=".yaml,.yml" />
@@ -58,6 +59,7 @@
           <span>Sombre</span>
         </label>
       </div>
+      <button id="toggleControlsBtn" class="collapse-handle" type="button" aria-expanded="true" aria-label="Replier le panneau">▴</button>
     </header>
 
     <main>
@@ -79,6 +81,21 @@
         <div class="modal-actions">
           <button id="editorCancelBtn" type="button">Annuler</button>
           <button id="editorSaveBtn" type="button">Sauvegarder changements</button>
+        </div>
+      </div>
+    </div>
+
+    <div id="sortHelpModal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="sortHelpTitle">
+      <div class="modal-card">
+        <h2 id="sortHelpTitle">Aide tri</h2>
+        <p>Utilise des balises dans le label ou l id pour definir l ordre.</p>
+        <p>Exemples: <code>[0]</code>, <code>[1]</code>, <code>[first]</code>, <code>[medium]</code>, <code>[latest]</code>.</p>
+        <p>Mots-cles supportes:</p>
+        <p>Francais: <code>[premier]</code>, <code>[deuxieme]</code>, <code>[troisieme]</code>, <code>[moyen]</code>, <code>[dernier]</code>, <code>[plus recent]</code>.</p>
+        <p>Allemand: <code>[erste]</code>, <code>[zweite]</code>, <code>[dritte]</code>, <code>[mittel]</code>, <code>[letzter]</code>, <code>[neueste]</code>.</p>
+        <p>Italien: <code>[primo]</code>, <code>[secondo]</code>, <code>[terzo]</code>, <code>[medio]</code>, <code>[ultimo]</code>, <code>[piu recente]</code>.</p>
+        <div class="modal-actions">
+          <button id="sortHelpCloseBtn" type="button">Fermer</button>
         </div>
       </div>
     </div>
