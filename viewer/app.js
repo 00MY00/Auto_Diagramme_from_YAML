@@ -45,10 +45,69 @@ const EDIT_BUTTON_SIZE = 30;
 let focusedNodeId = "";
 const ORDER_TAG_WEIGHT = {
   first: 0,
+  early: 0,
+  beginning: 0,
+  start: 0,
+  second: 1,
+  third: 2,
+  fourth: 3,
+  premier: 0,
+  premiere: 0,
+  premieres: 0,
+  deuxieme: 1,
+  troisieme: 2,
+  quatrieme: 3,
+  debut: 0,
+  erste: 0,
+  erster: 0,
+  erstes: 0,
+  zweite: 1,
+  drittes: 2,
+  dritte: 2,
+  primo: 0,
+  prima: 0,
+  secondo: 1,
+  terzo: 2,
   medium: 500,
-  latest: 1000
+  middle: 500,
+  mid: 500,
+  moyen: 500,
+  moyenne: 500,
+  milieu: 500,
+  mittel: 500,
+  mitte: 500,
+  medio: 500,
+  media: 500,
+  latest: 1000,
+  last: 1000,
+  newest: 1000,
+  recent: 1000,
+  most_recent: 1000,
+  dernier: 1000,
+  derniere: 1000,
+  plus_recent: 1000,
+  plus_recente: 1000,
+  final: 1000,
+  finale: 1000,
+  neueste: 1000,
+  letzter: 1000,
+  letztes: 1000,
+  zuletzt: 1000,
+  ultimo: 1000,
+  ultima: 1000,
+  recente: 1000,
+  piu_recente: 1000
 };
 const TEXT_COLLATOR = new Intl.Collator("fr", { numeric: true, sensitivity: "base" });
+
+function normalizeOrderToken(token) {
+  return String(token || "")
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[\s-]+/g, "_")
+    .trim();
+}
 
 function extractOrderTagValue(rawText) {
   const text = String(rawText || "").toLowerCase();
@@ -56,7 +115,7 @@ function extractOrderTagValue(rawText) {
   let minValue = Number.POSITIVE_INFINITY;
   let match;
   while ((match = re.exec(text)) !== null) {
-    const token = String(match[1] || "").trim();
+    const token = normalizeOrderToken(match[1]);
     if (!token) {
       continue;
     }
