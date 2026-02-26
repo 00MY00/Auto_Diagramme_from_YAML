@@ -1632,6 +1632,35 @@ async function openYamlExplorer() {
   return false;
 }
 
+function pickFirstYamlFileFromDrop(dataTransfer) {
+  const files = Array.from(dataTransfer?.files || []);
+  return files.find((file) => /\.(yaml|yml)$/i.test(String(file?.name || ""))) || null;
+}
+
+async function handleDroppedYamlFile(file) {
+  if (!file) {
+    setStatus("Aucun fichier YAML detecte dans le drop.", true);
+    return;
+  }
+
+  const hasLoadedGraph = Boolean(cy && currentYamlDoc);
+  if (hasLoadedGraph) {
+    const confirmed = window.confirm("Voulez-vous charger un autre fichier YAML ?");
+    if (!confirmed) {
+      setStatus("Chargement annule.");
+      return;
+    }
+  }
+
+  try {
+    const text = await file.text();
+    const sourceLabel = await resolveSourceLabelForPickedFile(file.name);
+    renderFromYamlText(text, sourceLabel);
+  } catch (error) {
+    setStatus(`Erreur de chargement YAML: ${error.message}`, true);
+  }
+}
+
 function renderFromYamlText(yamlText, sourceLabel) {
   const parsed = jsyaml.load(yamlText);
   if (!parsed || typeof parsed !== "object") {
@@ -1697,6 +1726,22 @@ yamlFileInput.addEventListener("change", async (event) => {
   } catch (error) {
     setStatus(`Erreur de parsing YAML: ${error.message}`, true);
   }
+});
+
+window.addEventListener("dragover", (event) => {
+  if (!pickFirstYamlFileFromDrop(event.dataTransfer)) {
+    return;
+  }
+  event.preventDefault();
+});
+
+window.addEventListener("drop", async (event) => {
+  const yamlFile = pickFirstYamlFileFromDrop(event.dataTransfer);
+  if (!yamlFile) {
+    return;
+  }
+  event.preventDefault();
+  await handleDroppedYamlFile(yamlFile);
 });
 
 editNodeBtn.addEventListener("click", openEditorModalForNode);
