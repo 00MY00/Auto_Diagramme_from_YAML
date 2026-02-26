@@ -2,6 +2,10 @@ const DEFAULT_YAML_PATH = "../YAML/features.yaml";
 const YAML_API_FILES_PATH = "/api/yaml-files";
 const YAML_DIR_WEB_PATH = "../YAML/";
 const POSITION_STORAGE_KEY = "yaml_feature_diagram_positions_v1";
+const THEME_STORAGE_KEY = "yaml_feature_diagram_theme_v1";
+const SORT_MODE_STORAGE_KEY = "yaml_feature_diagram_sort_mode_v1";
+const VIEW_MODE_STORAGE_KEY = "yaml_feature_diagram_view_mode_v1";
+const VIEWPORT_STORAGE_KEY = "yaml_feature_diagram_viewport_v1";
 const CLUSTER_PALETTE = [
   "#2c7da0",
   "#a23b72",
@@ -43,6 +47,9 @@ let currentYamlSource = DEFAULT_YAML_PATH;
 let selectedNodeId = "";
 const EDIT_BUTTON_SIZE = 30;
 let focusedNodeId = "";
+let cleanupMouseWheelZoom = null;
+let pendingViewportRestore = false;
+let viewportSaveTimer = null;
 const ORDER_TAG_WEIGHT = {
   first: 0,
   early: 0,
@@ -173,6 +180,124 @@ function compareNodesForLayout(a, b) {
     return compareByOrderTagsDesc(a, b);
   }
   return compareByOrderTagsAsc(a, b);
+}
+
+function restoreUiPreferences() {
+  try {
+    const savedTheme = localStorage.getItem(THEME_STORAGE_KEY);
+    if (savedTheme === "dark" || savedTheme === "light") {
+      themeToggle.checked = savedTheme === "dark";
+    }
+
+    const savedSort = localStorage.getItem(SORT_MODE_STORAGE_KEY);
+    if (savedSort && sortModeSelect) {
+      const exists = Array.from(sortModeSelect.options).some((opt) => opt.value === savedSort);
+      if (exists) {
+        sortModeSelect.value = savedSort;
+      }
+    }
+
+    const savedViewMode = localStorage.getItem(VIEW_MODE_STORAGE_KEY);
+    if (savedViewMode && viewModeSelect) {
+      const exists = Array.from(viewModeSelect.options).some((opt) => opt.value === savedViewMode);
+      if (exists) {
+        viewModeSelect.value = savedViewMode;
+      }
+    }
+  } catch (error) {
+    console.warn("Restauration des preferences UI impossible.", error);
+  }
+}
+
+function saveViewportState() {
+  if (!cy) {
+    return;
+  }
+  const zoom = cy.zoom();
+  const pan = cy.pan();
+  try {
+    localStorage.setItem(
+      VIEWPORT_STORAGE_KEY,
+      JSON.stringify({
+        zoom,
+        pan: { x: pan.x, y: pan.y }
+      })
+    );
+  } catch (error) {
+    console.warn("Sauvegarde du viewport impossible.", error);
+  }
+}
+
+function scheduleViewportSave() {
+  if (viewportSaveTimer) {
+    clearTimeout(viewportSaveTimer);
+  }
+  viewportSaveTimer = setTimeout(() => {
+    viewportSaveTimer = null;
+    saveViewportState();
+  }, 120);
+}
+
+function restoreViewportState() {
+  if (!cy) {
+    return false;
+  }
+  try {
+    const raw = localStorage.getItem(VIEWPORT_STORAGE_KEY);
+    if (!raw) {
+      return false;
+    }
+    const parsed = JSON.parse(raw);
+    const zoom = Number(parsed?.zoom);
+    const panX = Number(parsed?.pan?.x);
+    const panY = Number(parsed?.pan?.y);
+    if (!Number.isFinite(zoom) || !Number.isFinite(panX) || !Number.isFinite(panY)) {
+      return false;
+    }
+    const clampedZoom = Math.max(cy.minZoom(), Math.min(cy.maxZoom(), zoom));
+    cy.zoom(clampedZoom);
+    cy.pan({ x: panX, y: panY });
+    return true;
+  } catch (error) {
+    console.warn("Restauration du viewport impossible.", error);
+    return false;
+  }
+}
+
+function installMouseWheelZoom() {
+  if (!cy) {
+    return;
+  }
+
+  const container = cy.container();
+  if (!container) {
+    return;
+  }
+
+  const handler = (event) => {
+    // Keep browser/system zoom gestures untouched.
+    if (event.ctrlKey) {
+      return;
+    }
+
+    const minZoom = cy.minZoom();
+    const maxZoom = cy.maxZoom();
+    const current = cy.zoom();
+    const factor = Math.exp(-event.deltaY * 0.0015);
+    const next = Math.max(minZoom, Math.min(maxZoom, current * factor));
+
+    cy.zoom({
+      level: next,
+      renderedPosition: { x: event.offsetX, y: event.offsetY }
+    });
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  container.addEventListener("wheel", handler, { passive: false });
+  cleanupMouseWheelZoom = () => {
+    container.removeEventListener("wheel", handler);
+  };
 }
 
 function setStatus(message, isError = false) {
@@ -714,6 +839,10 @@ function runLayout() {
   layout.one("layoutstop", () => {
     resolveNodeOverlaps(180, 16);
     cy.fit(undefined, 45);
+    if (pendingViewportRestore) {
+      restoreViewportState();
+      pendingViewportRestore = false;
+    }
   });
   layout.run();
 }
@@ -1107,6 +1236,11 @@ async function saveNodeLabelChanges() {
 }
 
 function initCy(elements) {
+  if (cleanupMouseWheelZoom) {
+    cleanupMouseWheelZoom();
+    cleanupMouseWheelZoom = null;
+  }
+
   if (cy) {
     cy.destroy();
   }
@@ -1262,8 +1396,12 @@ function initCy(elements) {
         }
       }
     ],
-    wheelSensitivity: 0.2
+    wheelSensitivity: 1,
+    userZoomingEnabled: false
   });
+
+  installMouseWheelZoom();
+  pendingViewportRestore = true;
 
   const hadSaved = restorePositions();
   applyClusterEdgeColors();
@@ -1273,6 +1411,10 @@ function initCy(elements) {
   } else {
     resolveNodeOverlaps(120, 14);
     cy.fit(undefined, 35);
+    if (pendingViewportRestore) {
+      restoreViewportState();
+      pendingViewportRestore = false;
+    }
   }
 
   applyContainmentVisibility();
@@ -1303,6 +1445,7 @@ function initCy(elements) {
   });
 
   cy.on("drag free position pan zoom resize render", updateEditButtonPosition);
+  cy.on("pan zoom", scheduleViewportSave);
 }
 
 function applyTheme() {
@@ -1544,9 +1687,20 @@ refreshBtn.addEventListener("click", () => window.location.reload());
 saveBtn.addEventListener("click", savePositions);
 resetBtn.addEventListener("click", resetPositions);
 viewModeSelect.addEventListener("change", runLayout);
+viewModeSelect.addEventListener("change", () => {
+  localStorage.setItem(VIEW_MODE_STORAGE_KEY, viewModeSelect.value);
+});
 sortModeSelect?.addEventListener("change", runLayout);
 exportBtn.addEventListener("click", exportDiagram);
-themeToggle.addEventListener("change", applyTheme);
+themeToggle.addEventListener("change", () => {
+  localStorage.setItem(THEME_STORAGE_KEY, themeToggle.checked ? "dark" : "light");
+  applyTheme();
+});
+sortModeSelect?.addEventListener("change", () => {
+  localStorage.setItem(SORT_MODE_STORAGE_KEY, sortModeSelect.value);
+});
+window.addEventListener("beforeunload", saveViewportState);
 
+restoreUiPreferences();
 applyTheme();
 init();
