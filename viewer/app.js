@@ -27,6 +27,7 @@ const yamlFileInput = document.getElementById("yamlFileInput");
 const searchInput = document.getElementById("searchInput");
 const showContainmentInput = document.getElementById("showContainmentInput");
 const layoutBtn = document.getElementById("layoutBtn");
+const addBubbleBtn = document.getElementById("addBubbleBtn");
 const refreshBtn = document.getElementById("refreshBtn");
 const saveBtn = document.getElementById("saveBtn");
 const resetBtn = document.getElementById("resetBtn");
@@ -351,6 +352,66 @@ function domainNodeId(domainId) {
   return `domain__${escapeForId(domainId)}`;
 }
 
+function normalizeIdToken(raw) {
+  return String(raw || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-zA-Z0-9_-]+/g, "_")
+    .replace(/^_+|_+$/g, "")
+    .toLowerCase();
+}
+
+function createUniqueBubbleId(label) {
+  const baseToken = normalizeIdToken(label) || "note";
+  const base = `bubble_${baseToken}`;
+  const used = new Set();
+
+  const domains = Array.isArray(currentYamlDoc?.domains) ? currentYamlDoc.domains : [];
+  for (const domain of domains) {
+    const domainId = String(domain?.id || "").trim();
+    if (domainId) {
+      used.add(domainNodeId(domainId));
+    }
+    const features = Array.isArray(domain?.features) ? domain.features : [];
+    for (const feature of features) {
+      const featureId = String(feature?.id || "").trim();
+      if (featureId) {
+        used.add(featureId);
+      }
+    }
+  }
+
+  const bubbles = Array.isArray(currentYamlDoc?.bubbles) ? currentYamlDoc.bubbles : [];
+  for (const bubble of bubbles) {
+    const bubbleId = String(bubble?.id || "").trim();
+    if (bubbleId) {
+      used.add(bubbleId);
+    }
+  }
+
+  const relationships = Array.isArray(currentYamlDoc?.relationships) ? currentYamlDoc.relationships : [];
+  for (const rel of relationships) {
+    const from = String(rel?.from || "").trim();
+    const to = String(rel?.to || "").trim();
+    if (from) {
+      used.add(from);
+    }
+    if (to) {
+      used.add(to);
+    }
+  }
+
+  if (!used.has(base)) {
+    return base;
+  }
+
+  let n = 2;
+  while (used.has(`${base}_${n}`)) {
+    n++;
+  }
+  return `${base}_${n}`;
+}
+
 function hashString(value) {
   let hash = 0;
   for (let i = 0; i < value.length; i++) {
@@ -422,6 +483,7 @@ function buildGraphElements(doc) {
   let relationEdgeCount = 0;
 
   const domains = Array.isArray(doc.domains) ? doc.domains : [];
+  const bubbles = Array.isArray(doc.bubbles) ? doc.bubbles : [];
   const relationships = Array.isArray(doc.relationships) ? doc.relationships : [];
 
   for (const domain of domains) {
@@ -457,6 +519,21 @@ function buildGraphElements(doc) {
         }
       });
     }
+  }
+
+  for (const bubble of bubbles) {
+    const bubbleId = String(bubble.id || `bubble_${nodes.length}`);
+    const bubbleLabel = String(bubble.label || bubbleId);
+    const bubbleDomain = String(bubble.domain || "");
+    ensureNode(
+      nodes,
+      nodeMap,
+      bubbleId,
+      bubbleLabel,
+      "bubble",
+      bubble.status || "unknown",
+      bubbleDomain
+    );
   }
 
   for (const rel of relationships) {
@@ -658,6 +735,11 @@ function applyViewModeStyles() {
       "text-max-width": isFileTree ? 230 : 190,
       "font-size": 9
     });
+    cy.nodes("[type = 'bubble']").style({
+      shape: "round-rectangle",
+      "text-max-width": isFileTree ? 230 : 190,
+      "font-size": 9
+    });
 
     cy.edges().style({
       "curve-style": "taxi",
@@ -673,6 +755,11 @@ function applyViewModeStyles() {
     cy.nodes("[type = 'external']").style({
       shape: "diamond",
       "text-max-width": 120,
+      "font-size": 9
+    });
+    cy.nodes("[type = 'bubble']").style({
+      shape: "round-rectangle",
+      "text-max-width": 170,
       "font-size": 9
     });
 
@@ -716,7 +803,8 @@ function buildFileTreePositions() {
 
       const externalNodes = featureNode
         .connectedEdges("[kind = 'relation']")
-        .connectedNodes("[type = 'external']")
+        .connectedNodes()
+        .filter("[type = 'external'], [type = 'bubble']")
         .sort(compareNodesForLayout);
 
       let extCount = 0;
@@ -783,7 +871,8 @@ function buildClusterSeedPositions() {
 
       const externalNodes = featureNode
         .connectedEdges("[kind = 'relation']")
-        .connectedNodes("[type = 'external']")
+        .connectedNodes()
+        .filter("[type = 'external'], [type = 'bubble']")
         .sort(compareNodesForLayout);
 
       let extCount = 0;
@@ -1065,7 +1154,7 @@ function isEditableNode(node) {
     return false;
   }
   const type = node.data("type");
-  return type === "domain" || type === "feature";
+  return type === "domain" || type === "feature" || type === "bubble";
 }
 
 function updateEditButtonPosition() {
@@ -1123,7 +1212,7 @@ function openEditorModalForNode() {
   }
 
   if (!isEditableNode(node)) {
-    setStatus("Seuls les domains et features sont editables.", true);
+    setStatus("Seuls les domains, features et bulles sont editables.", true);
     return;
   }
 
@@ -1162,6 +1251,17 @@ function updateYamlDocLabel(node, newLabel) {
         return true;
       }
     }
+  }
+
+  if (type === "bubble") {
+    const bubbleId = String(node.id() || "");
+    const bubbles = Array.isArray(currentYamlDoc.bubbles) ? currentYamlDoc.bubbles : [];
+    const bubble = bubbles.find((item) => String(item?.id || "") === bubbleId);
+    if (!bubble) {
+      return false;
+    }
+    bubble.label = newLabel;
+    return true;
   }
 
   return false;
@@ -1273,6 +1373,95 @@ async function saveNodeLabelChanges() {
   }
 }
 
+async function addBubbleLinkedToSelectedNode() {
+  if (!cy || !currentYamlDoc || !selectedNodeId) {
+    setStatus("Selectionne un element avant d ajouter une bulle.", true);
+    return;
+  }
+
+  const targetNode = cy.getElementById(selectedNodeId);
+  if (!targetNode || targetNode.empty()) {
+    setStatus("Element cible introuvable.", true);
+    return;
+  }
+
+  const label = window.prompt("Texte de la bulle:", "Nouvelle bulle");
+  if (label === null) {
+    setStatus("Creation de bulle annulee.");
+    return;
+  }
+
+  const trimmedLabel = label.trim();
+  if (!trimmedLabel) {
+    setStatus("Le texte de la bulle ne peut pas etre vide.", true);
+    return;
+  }
+
+  const relationType = (window.prompt("Type de lien:", "note_for") || "note_for").trim() || "note_for";
+  const bubbleId = createUniqueBubbleId(trimmedLabel);
+  const targetDomain = String(targetNode.data("domain") || "");
+  const edgeCluster = targetDomain || "cross_domain";
+  const targetPos = targetNode.position();
+  const bubblePos = { x: targetPos.x + 170, y: targetPos.y - 35 };
+
+  if (!Array.isArray(currentYamlDoc.bubbles)) {
+    currentYamlDoc.bubbles = [];
+  }
+  if (!Array.isArray(currentYamlDoc.relationships)) {
+    currentYamlDoc.relationships = [];
+  }
+
+  currentYamlDoc.bubbles.push({
+    id: bubbleId,
+    label: trimmedLabel,
+    domain: targetDomain
+  });
+  currentYamlDoc.relationships.push({
+    from: bubbleId,
+    to: targetNode.id(),
+    type: relationType
+  });
+
+  const edgeId = `relation__${Date.now()}_${Math.floor(Math.random() * 100000)}`;
+  cy.add([
+    {
+      group: "nodes",
+      data: {
+        id: bubbleId,
+        label: trimmedLabel,
+        type: "bubble",
+        status: "unknown",
+        domain: targetDomain
+      },
+      position: bubblePos
+    },
+    {
+      group: "edges",
+      data: {
+        id: edgeId,
+        source: bubbleId,
+        target: targetNode.id(),
+        relation: relationType,
+        kind: "relation",
+        cluster: edgeCluster
+      }
+    }
+  ]);
+
+  selectedNodeId = bubbleId;
+  applyClusterEdgeColors();
+  applyViewModeStyles();
+  applySearchFilter();
+  updateEditButtonPosition();
+
+  try {
+    await persistYamlDoc();
+    setStatus(`Bulle ajoutee et YAML sauvegarde (${currentYamlSource}).`);
+  } catch (error) {
+    setStatus(error.message, true);
+  }
+}
+
 function initCy(elements) {
   if (cleanupMouseWheelZoom) {
     cleanupMouseWheelZoom();
@@ -1349,6 +1538,22 @@ function initCy(elements) {
           "font-size": 9,
           "background-color": "#d4d4d4",
           "border-color": "#666"
+        }
+      },
+      {
+        selector: "node[type = 'bubble']",
+        style: {
+          shape: "round-rectangle",
+          width: "label",
+          height: "label",
+          padding: "9px",
+          "min-width": 62,
+          "min-height": 40,
+          "text-max-width": 170,
+          "font-size": 9,
+          "background-color": "#f7ecd8",
+          "border-color": "#9f7c46",
+          "border-style": "dashed"
         }
       },
       {
@@ -1516,6 +1721,11 @@ function applyTheme() {
     .style({
       "background-color": isDark ? "#434b57" : "#d4d4d4",
       "border-color": isDark ? "#9ba4b1" : "#666"
+    })
+    .selector("node[type = 'bubble']")
+    .style({
+      "background-color": isDark ? "#6f5e43" : "#f7ecd8",
+      "border-color": isDark ? "#d5b989" : "#9f7c46"
     })
     .selector("node[status = 'implemented']")
     .style({
@@ -1783,6 +1993,7 @@ window.addEventListener("keydown", (event) => {
 showContainmentInput.addEventListener("change", applyContainmentVisibility);
 searchInput.addEventListener("input", applySearchFilter);
 layoutBtn.addEventListener("click", runLayout);
+addBubbleBtn?.addEventListener("click", addBubbleLinkedToSelectedNode);
 refreshBtn.addEventListener("click", () => window.location.reload());
 saveBtn.addEventListener("click", savePositions);
 resetBtn.addEventListener("click", resetPositions);
